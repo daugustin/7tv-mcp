@@ -23,6 +23,9 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
+[project.scripts]
+7tv-cli = "cli:cli_entry"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",

@@ -151,7 +151,57 @@ pip install -e ".[dev]"
 
 ## Usage
 
-### Running the Server
+### CLI Tool for Local Testing
+
+The package includes a CLI tool for testing the MCP server tools directly without needing to set up the full MCP infrastructure. This is useful for development and debugging.
+
+After installation, you can use the `7tv-cli` command or run `python cli.py` directly.
+
+#### Examples:
+
+**Search for emotes:**
+```bash
+7tv-cli search "Pog" --limit 5
+# or
+python cli.py search "Pog" --limit 5 --animated true
+```
+
+**Get user emotes:**
+```bash
+7tv-cli user-emotes twitch 70647828
+# or
+python cli.py user-emotes kick USER_ID
+```
+
+**Get global emotes:**
+```bash
+7tv-cli global-emotes
+```
+
+**Get emote details:**
+```bash
+7tv-cli emote-details 603caa69fccf9c40e807ab87
+```
+
+**Get emote set:**
+```bash
+7tv-cli emote-set 62cdd34e72a832540de95857
+```
+
+**Copy emotes between sets (requires authentication):**
+```bash
+7tv-cli copy-emotes SOURCE_SET_ID TARGET_SET_ID --token YOUR_JWT_TOKEN
+# With override option
+7tv-cli copy-emotes SOURCE_SET_ID TARGET_SET_ID --token YOUR_JWT_TOKEN --override
+```
+
+**Get help:**
+```bash
+7tv-cli --help
+7tv-cli search --help  # Get help for a specific command
+```
+
+### Running the MCP Server
 
 The server can be run directly:
 
