@@ -72,6 +72,63 @@ Get information about a specific emote set by its ID.
 }
 ```
 
+### 6. **copy_emotes_between_sets** ⚠️ Requires Authentication
+Copy all emotes from one emote set to another. This is an authenticated operation requiring a valid 7TV JWT token.
+
+**Parameters:**
+- `source_set_id` (required): The 7TV emote set ID to copy from
+- `target_set_id` (required): The 7TV emote set ID to copy to
+- `auth_token` (required): JWT Bearer token for authentication
+- `override_conflicts` (optional): Whether to override existing emotes with the same name (default: false)
+
+**Example:**
+```json
+{
+  "source_set_id": "62cdd34e72a832540de95857",
+  "target_set_id": "65a1b2c3d4e5f6789abcdef0",
+  "auth_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "override_conflicts": false
+}
+```
+
+**Use cases:**
+- Copy emotes from one channel to another
+- Backup emote sets by copying to a personal set
+- Merge emote collections
+- Clone emote set configurations
+
+## Authentication
+
+Some tools (like `copy_emotes_between_sets`) require authentication with a 7TV JWT token. Here's how to obtain your token:
+
+### Getting Your 7TV Token
+
+1. **Login to 7TV**: Visit [7tv.app](https://7tv.app) and log in with your account
+2. **Open Browser DevTools**: Press `F12` or right-click and select "Inspect"
+3. **Open Console**: Navigate to the "Console" tab
+4. **Get Token**: Run this command:
+   ```javascript
+   localStorage.getItem('7tv-token')
+   ```
+5. **Copy Token**: Copy the token value (without quotes)
+
+### Token Security
+
+⚠️ **Important Security Notes:**
+- Your JWT token is sensitive information that grants access to your 7TV account
+- Never share your token publicly or commit it to version control
+- Tokens may expire and need to be refreshed
+- If you suspect your token has been compromised, log out of 7TV and log back in to invalidate the old token
+
+### Authentication Headers
+
+When authenticated operations are performed, the server sends requests with:
+```http
+Authorization: Bearer <your-jwt-token>
+```
+
+The 7TV API validates the token and checks if you have permission to perform the requested operation (e.g., modifying emote sets).
+
 ## Installation
 
 ### Prerequisites

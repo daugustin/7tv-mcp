@@ -16,6 +16,7 @@ mcp = FastMCP("7tv-mcp")
 API_BASE_URL = "https://7tv.io/v3"
 API_V3_BASE_URL = "https://api.7tv.app/v3"
 GRAPHQL_URL = "https://7tv.io/v3/gql"
+GRAPHQL_V4_URL = "https://7tv.app/v4/gql"  # For authenticated mutations
 CDN_BASE_URL = "https://cdn.7tv.app"
 
 # HTTP client for making requests
@@ -23,13 +24,18 @@ client = httpx.AsyncClient(timeout=30.0)
 
 
 # Helper functions
-async def make_request(url: str, method: str = "GET", json_data: dict | None = None) -> dict[str, Any]:
+async def make_request(
+    url: str,
+    method: str = "GET",
+    json_data: dict | None = None,
+    headers: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Make an HTTP request and return the JSON response."""
     try:
         if method == "POST":
-            response = await client.post(url, json=json_data)
+            response = await client.post(url, json=json_data, headers=headers)
         else:
-            response = await client.get(url)
+            response = await client.get(url, headers=headers)
 
         response.raise_for_status()
         return response.json()
@@ -37,6 +43,37 @@ async def make_request(url: str, method: str = "GET", json_data: dict | None = N
         return {"error": f"HTTP {e.response.status_code}: {e.response.text}"}
     except Exception as e:
         return {"error": f"Request failed: {str(e)}"}
+
+
+async def make_graphql_mutation(
+    mutation: str,
+    variables: dict[str, Any],
+    auth_token: str
+) -> dict[str, Any]:
+    """
+    Make an authenticated GraphQL mutation request to the 7TV v4 API.
+
+    Args:
+        mutation: GraphQL mutation string
+        variables: Variables for the mutation
+        auth_token: JWT Bearer token for authentication
+
+    Returns:
+        Response data or error dictionary
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {auth_token}"
+    }
+
+    result = await make_request(
+        GRAPHQL_V4_URL,
+        method="POST",
+        json_data={"query": mutation, "variables": variables},
+        headers=headers
+    )
+
+    return result
 
 
 def format_emote_result(emote: dict[str, Any]) -> str:
@@ -337,5 +374,139 @@ async def get_emote_set(emote_set_id: str) -> str:
 
     for emote in emotes:
         output += format_emote_result(emote) + "\n"
+
+    return output
+
+
+@mcp.tool()
+async def copy_emotes_between_sets(
+    source_set_id: str,
+    target_set_id: str,
+    auth_token: str,
+    override_conflicts: bool = False
+) -> str:
+    """
+    Copy all emotes from one emote set to another. This is an authenticated operation
+    that requires a valid 7TV JWT token. The user must have permission to modify the
+    target emote set.
+
+    This tool fetches all emotes from the source set and adds them to the target set.
+    If override_conflicts is True, emotes with conflicting names in the target set will
+    be replaced. Otherwise, conflicts will be skipped.
+
+    Use this when users want to:
+    - Copy emotes from one channel to another
+    - Backup emote sets by copying to a personal set
+    - Merge emote collections
+    - Clone emote set configurations
+
+    Args:
+        source_set_id: The 7TV emote set ID to copy from
+        target_set_id: The 7TV emote set ID to copy to
+        auth_token: JWT Bearer token for authentication (get from 7TV website localStorage '7tv-token')
+        override_conflicts: Whether to override existing emotes with the same name (default: False)
+
+    Returns:
+        Summary of the copy operation including successes and failures
+    """
+    # Step 1: Fetch source emote set
+    source_url = f"{API_V3_BASE_URL}/emote-sets/{source_set_id}"
+    source_result = await make_request(source_url)
+
+    if "error" in source_result:
+        return f"Error fetching source set: {source_result['error']}"
+
+    source_emotes = source_result.get("emotes", [])
+    source_name = source_result.get("name", "Unknown")
+
+    if not source_emotes:
+        return f"Source emote set '{source_name}' has no emotes to copy"
+
+    # Step 2: Fetch target emote set to verify it exists and get current state
+    target_url = f"{API_V3_BASE_URL}/emote-sets/{target_set_id}"
+    target_result = await make_request(target_url)
+
+    if "error" in target_result:
+        return f"Error fetching target set: {target_result['error']}"
+
+    target_name = target_result.get("name", "Unknown")
+
+    # Step 3: Add each emote from source to target using GraphQL mutation
+    mutation = """
+    mutation AddEmoteToSet($setId: Id!, $emote: EmoteSetEmoteId!, $overrideConflicts: Boolean) {
+        emoteSets {
+            emoteSet(id: $setId) {
+                addEmote(id: $emote, overrideConflicts: $overrideConflicts) {
+                    id
+                    name
+                }
+            }
+        }
+    }
+    """
+
+    success_count = 0
+    failed_emotes = []
+    skipped_emotes = []
+
+    output = f"Copying emotes from '{source_name}' to '{target_name}'...\n\n"
+
+    for emote in source_emotes:
+        emote_id = emote.get("id")
+        emote_name = emote.get("name", "Unknown")
+        emote_alias = emote.get("alias") or emote_name
+
+        if not emote_id:
+            skipped_emotes.append(f"{emote_name} (missing ID)")
+            continue
+
+        # Prepare mutation variables
+        variables = {
+            "setId": target_set_id,
+            "emote": {
+                "emoteId": emote_id,
+                "alias": emote_alias
+            },
+            "overrideConflicts": override_conflicts
+        }
+
+        # Execute mutation
+        result = await make_graphql_mutation(mutation, variables, auth_token)
+
+        if "error" in result:
+            error_msg = result["error"]
+            failed_emotes.append(f"{emote_name} ({emote_alias}): {error_msg}")
+        elif "errors" in result:
+            # GraphQL errors
+            error_details = result["errors"][0].get("message", "Unknown error")
+            if "conflict" in error_details.lower() and not override_conflicts:
+                skipped_emotes.append(f"{emote_name} ({emote_alias}): Name conflict")
+            else:
+                failed_emotes.append(f"{emote_name} ({emote_alias}): {error_details}")
+        else:
+            success_count += 1
+            output += f"✓ Added: {emote_name} ({emote_alias})\n"
+
+    # Summary
+    output += f"\n{'='*60}\n"
+    output += f"Summary:\n"
+    output += f"  Total emotes in source: {len(source_emotes)}\n"
+    output += f"  Successfully copied: {success_count}\n"
+    output += f"  Skipped (conflicts): {len(skipped_emotes)}\n"
+    output += f"  Failed: {len(failed_emotes)}\n"
+
+    if skipped_emotes:
+        output += f"\nSkipped emotes (use override_conflicts=True to replace):\n"
+        for emote in skipped_emotes[:10]:  # Show first 10
+            output += f"  - {emote}\n"
+        if len(skipped_emotes) > 10:
+            output += f"  ... and {len(skipped_emotes) - 10} more\n"
+
+    if failed_emotes:
+        output += f"\nFailed emotes:\n"
+        for emote in failed_emotes[:10]:  # Show first 10
+            output += f"  - {emote}\n"
+        if len(failed_emotes) > 10:
+            output += f"  ... and {len(failed_emotes) - 10} more\n"
 
     return output
